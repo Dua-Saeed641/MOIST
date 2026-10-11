@@ -7,11 +7,11 @@ For the data it sends to the dashboard, see [`docs/tracking.md`](docs/tracking.m
 
 (Vector version: `docs/wiring.svg`. To redraw it after changing a pin, edit and run `python docs/wiring.py`.)
 
-## The idea: the worker never touches the waste
+## The idea: measure while picking up
 
-The moisture probe sits at the **tip of a 12 to 15 cm stick fixed to the servo**. The worker holds the hand above the item. When the distance is right, the **servo swings the stick down**, taps the item for about 0.7 s, reads it and swings back up. The hand stays about 15 cm away the whole time.
+The worker picks items up as usual, wearing the glove. The moisture probe sits at the **tip of a 12 to 15 cm stick fixed to the servo**. As the hand closes in on an item and the distance is right, the **servo swings the stick down**, taps the item for about 0.7 s, reads it and swings back up. The result is on the wrist LEDs before the worker drops the item in a bin, so measuring adds no extra step.
 
-Why not fully contact-free? With these parts, nothing can measure an item's moisture from a distance. The humidity sensor reads the air, slowly, and the gas sensor reads smell. Both are useful as "something wet or rotting is near" hints, so they drive the beeping, but the actual wet/dry decision needs the probe to touch the item. The servo arm handles that touch, so the worker doesn't have to.
+Why does the probe have to touch the item? With these parts, nothing can measure an item's moisture from a distance. The humidity sensor reads the air, slowly, and the gas sensor reads smell. Both are useful as "something wet or rotting is near" hints, so they drive the beeping, but the actual wet/dry decision needs the probe to touch the item.
 
 ## How wet or dry is decided
 

@@ -2,7 +2,7 @@
 // Wiring: see hardware.md. Output: one JSON line per measurement on Serial @115200.
 //
 // Behaviour
-// The worker's hand never touches the waste: the probe sits at the tip of a stick on the servo.
+// The worker picks items up as usual; the probe on the servo arm taps each item during that pick-up, so no extra step.
 //   no target in range      -> matrix shows a dot, silent
 //   target 12..30 cm away   -> matrix shows closeness 0..10 (10 = arm can reach), bar at the bottom
 //   wet/rotting smell near  -> buzzer ticks faster the stronger it is (metal-detector style, from humidity + gas)

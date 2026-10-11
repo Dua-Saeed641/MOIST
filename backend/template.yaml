@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
-Description: MOIST - no-touch moisture glove. Ingest + analytics API, AI brief + questions (OpenRouter, Bedrock fallback), SNS alerts, hosted dashboard.
+Description: MOIST - moisture-sensing glove for waste segregation. Ingest + analytics API, AI brief + questions (OpenRouter, Bedrock fallback), SNS alerts, hosted dashboard.
 
 Parameters:
   WriteApiKey:

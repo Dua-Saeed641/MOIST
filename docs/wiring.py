@@ -176,7 +176,7 @@ for x in (825, 850):
     ax.add_patch(Rectangle((x - 4, 935), 8, 30, fc="#b0b0b0", ec=BLK, zorder=4))
 text(838, 978, "probe", 7, weight="bold")
 text(700, 1062, "PROBE = 2 wires from the 2 holes of the broken black sensor -> 2 steel screws ~1 cm apart\n"
-     "taped at the TIP OF THE SERVO ARM (top of the picture). The worker's hand never touches the waste.", 7.5,
+     "taped at the TIP OF THE SERVO ARM (top of the picture). It taps the item as the worker picks it up.", 7.5,
      ha="left", weight="bold")
 
 # golden-cylinder module (optional gas/aux)

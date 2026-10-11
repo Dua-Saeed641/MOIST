@@ -7,7 +7,7 @@ import meadow from "../assets/meadow.webp";
 const STEPS = [
   { t: "Approach", d: "An ultrasonic sensor measures the distance to the item. The wrist display counts down to 10 as the glove gets into range." },
   { t: "Measure", d: "A servo lowers a two-contact probe onto the item and reads its conductivity seven times. Wet material conducts; dry material does not." },
-  { t: "Sort", d: "A green, red or amber LED gives the result in under a second. The worker places the item without handling it." },
+  { t: "Sort", d: "A green, red or amber LED gives the result in under a second, while the item is still in hand. The worker drops it in the right bin." },
   { t: "Report", d: "The reading is sent to AWS with the time and collection point, and the area statistics update." },
 ];
 
@@ -15,6 +15,12 @@ const MORE: { icon: IconName; t: string; d: string }[] = [
   { icon: "spark", t: "AI assistant", d: "An LLM, called from AWS Lambda, writes a 06:30 brief for the ward officer and answers questions such as \"Which area needs a segregation drive?\" from the computed figures." },
   { icon: "alert", t: "Fault detection", d: "Readings from a shorted probe or a gas spike are flagged, excluded from the statistics and sent by e-mail." },
   { icon: "factory", t: "Plant routing", d: "Collection points with a high Energy Suitability Index are queued for direct transport to the waste-to-energy plant." },
+];
+
+const WHY: { icon: IconName; t: string; d: string }[] = [
+  { icon: "alert", t: "The gap", d: "Moisture is measured in a lab or with a hand-held meter, never on a collection round. Plants learn a load is too wet only when it arrives, and cities have no ward-level record of segregation." },
+  { icon: "glove", t: "What is new", d: "The measurement is built into the glove the worker already wears and happens during the pick-up itself. Each reading becomes city data: an Energy Suitability Index and one action per collection point." },
+  { icon: "check", t: "Why it matters", d: "Workers get wet or dry in under a second. Officers know where to send dry loads and where to run a segregation drive. Plants receive drier fuel, and the city gets the online record the 2026 rules ask for." },
 ];
 
 const AWS = [
@@ -60,8 +66,8 @@ export default function Landing() {
             <span className="l-tag">Environmental Hacks · Waste &amp; Energy</span>
             <h1>A glove that sorts wet waste from dry</h1>
             <p>
-              A probe on the glove measures the moisture of an item before the worker touches it, and shows wet or
-              dry in under a second. Every reading is sent to AWS, so the city can see which collection points
+              A probe on the work glove measures the moisture of each item as the worker picks it up, and shows wet
+              or dry in under a second: no extra step, no separate meter. Every reading is sent to AWS, so the city can see which collection points
               produce waste that is dry enough to burn for energy.
             </p>
             <div className="l-cta">
@@ -84,8 +90,8 @@ export default function Landing() {
           <span className="eyebrow">The problem</span>
           <h2>Mixed waste is hard to burn and hard to measure.</h2>
           <p className="l-lead">
-            Sorting at collection points is done by sight, smell and hand. It exposes workers to health risks
-            and produces no record of how well each area segregates.
+            Sorting at collection points is done by sight and smell. Nobody measures how wet a load is,
+            so there is no record of how well each area segregates and no way to tell which loads can be burned.
           </p>
         </div>
         <dl className="l-facts">
@@ -93,6 +99,20 @@ export default function Landing() {
           <div><dt>41–52%</dt><dd>Typical moisture of Indian city waste, often above what waste-to-energy plants can burn efficiently.</dd></div>
           <div><dt>4 streams</dt><dd>Required by the Solid Waste Management Rules 2026, with online tracking of how waste is handled.</dd></div>
         </dl>
+      </section>
+
+      <section className="l-section">
+        <span className="eyebrow">Why MØIST</span>
+        <h2>Measurement at the worker's hand, decisions for the city</h2>
+        <div className="l-more">
+          {WHY.map((m) => (
+            <div key={m.t}>
+              <span className="l-ficon"><Icon name={m.icon} size={18} /></span>
+              <h4>{m.t}</h4>
+              <p>{m.d}</p>
+            </div>
+          ))}
+        </div>
       </section>
 
       <section className="l-section l-how" id="how">

@@ -10,7 +10,7 @@ createRoot(document.getElementById("root")!).render(
     <div className="banner-text">
       <Logo />
       <h1>A glove that sorts wet waste from dry</h1>
-      <p>No-touch moisture sensing · Waste-to-energy dashboard · Built on AWS</p>
+      <p>Moisture sensing at pick-up · Waste-to-energy dashboard · Built on AWS</p>
     </div>
     <img src={glove} alt="" />
   </div>,
