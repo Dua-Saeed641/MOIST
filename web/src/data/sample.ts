@@ -73,6 +73,8 @@ function makeReading(p: Profile, ts: number, daysAgo: number, rand: () => number
     anomaly,
     airTempC: +temp.toFixed(1),
     airRhPct: +(45 + rand() * 35).toFixed(0),
+    distanceCm: 12,
+    gasRaw: null,
   };
 }
 

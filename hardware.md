@@ -76,6 +76,8 @@ Keep the hand still while the arm taps (about 1.5 s). After a reading, move the 
 - **All GNDs connect together.** Run one wire from the power-module GND rail to the Arduino GND rail. Without this shared ground, the matrix and servo will behave erratically.
 - No power module? Connect the top + rail to the Arduino 5V and unplug the servo. The Arduino can't supply the servo's current.
 
+> **What happened on our build (2026-10-10):** with the MB102 power module plugged into the breadboard, its pins joined the + and − rails. Plugging the Arduino 5V into the + rail then shorted it, and the Arduino dropped off USB. It works with the module **removed**, and every rail is powered from the **Arduino 5V pin** (plus one wire from the − rail to Arduino GND). Before using the module again, test it off the breadboard: with an LED and a resistor, check that its printed **+** really matches the breadboard's red stripe.
+
 ## Making the probe (from the broken module)
 
 The MH-sensor boards all share the same circuit: the sensor sits on two pads and the chip reads it through **AO**. The broken black sensor's two holes are where the probe goes.
@@ -125,6 +127,23 @@ The values at the top of the sketch are calibration settings. The defaults are g
 If the golden module is an MQ gas sensor, let it **warm up for 2 minutes** after power-on, then reset the Arduino. The firmware saves the gas level at startup as the "clean air" value.
 
 It doesn't matter whether your board's raw value goes **up or down** when wet. The code handles either direction as long as `RAW_DRY` and `RAW_WET` are measured. Re-upload after changing them. Then test each material from report section 7.1 (air, wet sponge, vegetable scraps, dry paper, plastic, cloth) and check that the W/D/? results make sense.
+
+## Test programs
+
+| Sketch | Use |
+|---|---|
+| `arduino/hw_test` | Checks each part in turn (LEDs, buzzer, matrix, servo), then prints live sensor values at 115200 baud. Press RESET to run it again |
+| `arduino/probe_test` | Probe only: prints `moisture_raw`, used to find `RAW_DRY` / `RAW_WET` |
+| `arduino/short_finder` | Wire from A4 into any hole: the "L" LED lights if that hole is connected to GND. Unpowered devices also light it, so test only with the row empty |
+
+Measured calibration on our probe: dry paper or air **970–1023**, wet sponge or water **770–880**, wet finger **~650**. A **lower** value means wetter.
+
+## Live on the dashboard
+
+1. Upload `arduino/moist_glove` and leave the Arduino plugged into the laptop with USB. **Close the Arduino IDE Serial Monitor**, because only one program can use the port.
+2. `pip install pyserial`, then `python gateway/gateway.py`. Add `--port COMx` if the port isn't COM5. To set where the glove is used, add `--area-name "…" --lat … --lon …`.
+3. Make sure `web/.env` contains `VITE_API_URL=http://localhost:8787`, then run `cd web && npm install && npm run dev` and open http://localhost:5173.
+4. Each measurement shows up in "Latest checks" within about 3 s. Readings are saved in `gateway/readings.jsonl`.
 
 ## Mounting on the glove
 

@@ -27,6 +27,8 @@ export interface Reading {
   anomaly: boolean;
   airTempC: number;
   airRhPct: number;
+  distanceCm: number | null; // sonar distance at measurement (glove); null if unknown
+  gasRaw: number | null; // gas sensor, if fitted
 }
 
 export interface Recommendation {

@@ -60,16 +60,31 @@ Lines starting with `#` are status messages, not readings. The gateway should sk
 | `airTempC` | `air_temp_c` |
 | `airRhPct` | `air_rh_pct` |
 | `deviceId`, `areaId`, `ts`, `id` | `device_id`, `area_id`, `ts`, `id` |
+| `distanceCm` | `distance_cm` (shown in "Latest checks" → Expand) |
+| `gasRaw` | `gas_raw` (shown in "Latest checks" → Expand; "—" when not fitted) |
 
-## New from the hardware (not in the dashboard yet)
+## Ideas not built yet
 
-| Field | Ideas for the dashboard |
+| Field | Idea |
 |---|---|
 | `gas_raw` | per-area average and trend. High gas together with wet means rotting organic waste, so flag it. Hide it if every value is null |
 | `moisture_slope` | mostly for the ML model. Could appear in the reading detail view |
 | `distance_cm` | quality check: readings far from the usual ~12 cm are less reliable. Could be shown as a small "confidence" indicator |
 
-To add one, put it in `Reading` in `types.ts`, in `ApiReading` and `toReading` in `http.ts` (use `?? null`), and in `makeReading` in `data/sample.ts` so the simulated feed has it too.
+To add a field, put it in `Reading` in `types.ts`, in `ApiReading` and `toReading` in `http.ts` (use `?? null`), and in `makeReading` in `data/sample.ts` so the simulated feed has it too.
+
+## The local API (gateway/gateway.py)
+
+For the demo, the gateway on the laptop **is** the backend. It reads the glove over USB and serves the API on `http://localhost:8787`:
+
+| Method | Path | Returns |
+|---|---|---|
+| GET | `/areas` | `{"areas": [area]}`: the one area set by `--area-name/--lat/--lon` |
+| GET | `/readings?from=<ms>&limit=<n>` | `{"readings": [...]}`, oldest first |
+| GET | `/actions` | `{"actions": {key: state}}` |
+| PUT | `/actions/<key>` | body `{"state": "open" \| "scheduled" \| "done"}` |
+
+`anomaly` is set by the gateway when `moisture_raw < 300`. That's far below any real wet reading (~650+) and usually means metal is shorting the probe. The AWS backend can replace this with the Isolation Forest later, keeping the same API.
 
 ## Metrics built from these (already in `web/src/lib/metrics.ts`)
 

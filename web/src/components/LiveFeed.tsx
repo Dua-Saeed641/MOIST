@@ -35,6 +35,8 @@ export function LiveFeed({ readings, metrics, onSelect }: Props) {
                 <th>Sensor</th>
                 <th>Temp</th>
                 <th>Humidity</th>
+                <th>Distance</th>
+                <th>Gas</th>
                 <th>Device</th>
               </>
             )}
@@ -55,6 +57,8 @@ export function LiveFeed({ readings, metrics, onSelect }: Props) {
                   <td>{r.moistureRaw}</td>
                   <td>{r.airTempC}°C</td>
                   <td>{r.airRhPct}%</td>
+                  <td>{r.distanceCm != null ? `${r.distanceCm} cm` : "—"}</td>
+                  <td>{r.gasRaw ?? "—"}</td>
                   <td>{r.deviceId}</td>
                 </>
               )}

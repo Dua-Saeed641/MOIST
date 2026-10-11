@@ -20,13 +20,13 @@ const byte PROBE = A0, PROBE_PWR = A1, AUX = A2, LED_SENT = A3;  // A3 = blue
 
 // ---- calibration knobs: set these from the moisture_raw values you see in Serial Monitor ----
 const char *DEVICE_ID = "glove-01";
-const int RAW_DRY = 1000;   // probe touching dry paper / open air
-const int RAW_WET = 350;    // probe touching a wet sponge
+const int RAW_DRY = 990;    // measured 2026-10-10: dry paper / air ~970-1023
+const int RAW_WET = 800;    // measured 2026-10-10: wet sponge / water ~770-880, wet finger ~650
 const float DRY_MAX = 0.38, WET_MIN = 0.62;  // same cut-offs as web/src/config.ts CLASS_CUTOFFS
 const int NEAR_CM = 12;     // sonar reading when the lowered arm tip just touches the item
 const int FAR_CM = 30;      // beyond this: "no target"
 const byte ARM_UP = 0, ARM_DOWN = 90;  // servo angles: parked / probe touching. Tune for your mount
-const bool HAS_AUX = true;  // golden module on A2 fitted? false -> gas_raw is null
+const bool HAS_AUX = false; // golden module on A2 fitted? set true once it's wired (false -> gas_raw is null)
 const bool MX_MIRROR = false;  // flip if digits appear mirrored on your matrix
 const bool DHT_IS_22 = false;  // blue DHT11 = false, white DHT22 = true
 

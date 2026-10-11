@@ -15,6 +15,8 @@ interface ApiReading {
   anomaly: boolean;
   air_temp_c?: number;
   air_rh_pct?: number;
+  distance_cm?: number | null;
+  gas_raw?: number | null;
 }
 
 const toReading = (r: ApiReading): Reading => ({
@@ -28,6 +30,8 @@ const toReading = (r: ApiReading): Reading => ({
   anomaly: r.anomaly,
   airTempC: r.air_temp_c ?? 0,
   airRhPct: r.air_rh_pct ?? 0,
+  distanceCm: r.distance_cm ?? null,
+  gasRaw: r.gas_raw ?? null,
 });
 
 export class HttpDataSource implements DataSource {
