@@ -141,9 +141,10 @@ Measured calibration on our probe: dry paper or air **970–1023**, wet sponge o
 ## Live on the dashboard
 
 1. Upload `arduino/moist_glove` and leave the Arduino plugged into the laptop with USB. **Close the Arduino IDE Serial Monitor**, because only one program can use the port.
-2. `pip install pyserial`, then `python gateway/gateway.py`. Add `--port COMx` if the port isn't COM5. To set where the glove is used, add `--area-name "…" --lat … --lon …`.
-3. Make sure `web/.env` contains `VITE_API_URL=http://localhost:8787`, then run `cd web && npm install && npm run dev` and open http://localhost:5173.
-4. Each measurement shows up in "Latest checks" within about 3 s. Readings are saved in `gateway/readings.jsonl`.
+2. Start the API: `python backend/local.py` (or use the AWS API, see `README.md`).
+3. `pip install pyserial`, then `python gateway/gateway.py`. Add `--port COMx` if the port isn't COM5. To set where the glove is used, add `--area-id ward12 --area-name "…" --lat … --lon …`. For AWS add `--api <ApiUrl> --key <WriteApiKey>`.
+4. `cd web && npm install && npm run dev`, then open http://localhost:5173/#/app/live.
+5. Each measurement shows up on **Live sorting** within about 2 s. If the API is unreachable, the gateway keeps readings in `gateway/outbox.jsonl` and sends them later.
 
 ## Mounting on the glove
 

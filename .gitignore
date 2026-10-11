@@ -1,6 +1,9 @@
 node_modules/
 dist/
 .env
-gateway/readings.jsonl
-gateway/actions.json
+.aws-sam/
+gateway/outbox.jsonl
+backend/local-data.json
 __pycache__/
+samconfig.toml
+.env.production

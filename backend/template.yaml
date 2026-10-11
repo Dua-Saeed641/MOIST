@@ -1,43 +1,42 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
-Description: MOIST - moisture-sensing glove ingest, area analytics API and nightly aggregation.
+Description: MOIST - no-touch moisture glove. Ingest + analytics API, Claude on Bedrock (brief + questions), SNS alerts, hosted dashboard.
 
 Parameters:
   WriteApiKey:
     Type: String
     NoEcho: true
-    Default: ""
-    Description: Shared secret for write endpoints (x-api-key). Empty disables the check (local only).
-
+    MinLength: 16
+    Description: Shared secret the gateway sends as x-api-key when posting readings.
   AlertEmail:
     Type: String
     Default: ""
-    Description: Optional. E-mail address that receives an alert whenever an unusual reading is detected.
-
-  PermissionsBoundaryArn:
+    Description: Optional e-mail for anomaly alerts and the morning brief (confirm the subscription mail).
+  BedrockRegion:
     Type: String
-    AllowedPattern: "^arn:aws:iam::[0-9]{12}:policy/.+$"
-    ConstraintDescription: Must be the ARN of an IAM policy, like arn:aws:iam::123456789012:policy/moist-boundary
-    Description: IAM policy used as the permissions boundary for every role this stack creates (the CloudFormation service role requires it).
+    Default: us-east-1
+    Description: Region used for Claude in Amazon Bedrock (the global endpoint routes from any listed region).
+
+  GatewayUrl:
+    Type: String
+    Default: ""
+    Description: Optional public ngrok URL of the laptop gateway (e.g. https://your-name.ngrok-free.app). Lets the dashboard show whether the glove is plugged in.
+  GatewayToken:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: Optional shared secret the API sends to the gateway status endpoint (same value as the gateway's --status-token).
 
 Conditions:
-  HasAlertEmail: !Not [!Equals [!Ref AlertEmail, ""]]
+  HasEmail: !Not [!Equals [!Ref AlertEmail, ""]]
 
 Globals:
   Function:
-    Runtime: python3.12
+    Runtime: python3.14
     CodeUri: src/
-    PermissionsBoundary: !Ref PermissionsBoundaryArn
-    Timeout: 15
-    MemorySize: 256
-    Environment:
-      Variables:
-        READINGS_TABLE: !Ref ReadingsTable
-        STATS_TABLE: !Ref AreaStatsTable
-        AREAS_TABLE: !Ref AreasTable
-        STATE_TABLE: !Ref AppStateTable
-        MODEL_BUCKET: !Ref ModelBucket
-        WRITE_API_KEY: !Ref WriteApiKey
+    Timeout: 29
+    MemorySize: 512
+    Architectures: [arm64]
 
 Resources:
   ReadingsTable:
@@ -58,28 +57,14 @@ Resources:
             - { AttributeName: ts, KeyType: RANGE }
           Projection: { ProjectionType: ALL }
 
-  AreaStatsTable:
-    Type: AWS::DynamoDB::Table
-    Properties:
-      BillingMode: PAY_PER_REQUEST
-      AttributeDefinitions:
-        - { AttributeName: area_id, AttributeType: S }
-        - { AttributeName: date, AttributeType: S }
-      KeySchema:
-        - { AttributeName: area_id, KeyType: HASH }
-        - { AttributeName: date, KeyType: RANGE }
-
   AreasTable:
     Type: AWS::DynamoDB::Table
     Properties:
       BillingMode: PAY_PER_REQUEST
-      AttributeDefinitions:
-        - { AttributeName: area_id, AttributeType: S }
-      KeySchema:
-        - { AttributeName: area_id, KeyType: HASH }
+      AttributeDefinitions: [{ AttributeName: id, AttributeType: S }]
+      KeySchema: [{ AttributeName: id, KeyType: HASH }]
 
-  # Action-queue status and dashboard config (thresholds, ESI weights).
-  AppStateTable:
+  StateTable:  # action queue + latest brief
     Type: AWS::DynamoDB::Table
     Properties:
       BillingMode: PAY_PER_REQUEST
@@ -90,98 +75,101 @@ Resources:
         - { AttributeName: kind, KeyType: HASH }
         - { AttributeName: key, KeyType: RANGE }
 
-  ModelBucket:
-    Type: AWS::S3::Bucket
-
   AlertTopic:
     Type: AWS::SNS::Topic
-
-  AlertSubscription:
+  AlertMail:
     Type: AWS::SNS::Subscription
-    Condition: HasAlertEmail
-    Properties:
-      TopicArn: !Ref AlertTopic
-      Protocol: email
-      Endpoint: !Ref AlertEmail
+    Condition: HasEmail
+    Properties: { TopicArn: !Ref AlertTopic, Protocol: email, Endpoint: !Ref AlertEmail }
 
   HttpApi:
     Type: AWS::Serverless::HttpApi
     Properties:
-      # Caps request volume for every route, so a leaked URL or a runaway client cannot run up usage.
-      DefaultRouteSettings:
-        ThrottlingBurstLimit: 20
-        ThrottlingRateLimit: 10
+      DefaultRouteSettings: { ThrottlingBurstLimit: 50, ThrottlingRateLimit: 25 }
       CorsConfiguration:
         AllowOrigins: ["*"]
         AllowHeaders: [content-type, x-api-key]
         AllowMethods: [GET, POST, PUT, OPTIONS]
 
-  IngestFunction:
+  ApiFunction:
     Type: AWS::Serverless::Function
     Properties:
-      Handler: ingest.handler
+      Handler: app.handler
       Environment:
         Variables:
+          READINGS_TABLE: !Ref ReadingsTable
+          AREAS_TABLE: !Ref AreasTable
+          STATE_TABLE: !Ref StateTable
+          WRITE_API_KEY: !Ref WriteApiKey
           ALERT_TOPIC_ARN: !Ref AlertTopic
+          BRIEF_TOPIC_ARN: !Ref AlertTopic
+          BEDROCK_REGION: !Ref BedrockRegion
+          GATEWAY_URL: !Ref GatewayUrl
+          GATEWAY_TOKEN: !Ref GatewayToken
       Policies:
-        - SNSPublishMessagePolicy: { TopicName: !GetAtt AlertTopic.TopicName }
         - DynamoDBCrudPolicy: { TableName: !Ref ReadingsTable }
-        - DynamoDBCrudPolicy: { TableName: !Ref AreaStatsTable }
-        - DynamoDBReadPolicy: { TableName: !Ref AreasTable }
-        - S3ReadPolicy: { BucketName: !Ref ModelBucket }
-      Events:
-        Post:
-          Type: HttpApi
-          Properties: { ApiId: !Ref HttpApi, Path: /readings, Method: POST }
-        Batch:
-          Type: HttpApi
-          Properties: { ApiId: !Ref HttpApi, Path: /readings/batch, Method: POST }
-
-  AreasFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      Handler: api.handler
-      Policies:
-        - DynamoDBReadPolicy: { TableName: !Ref ReadingsTable }
-        - DynamoDBReadPolicy: { TableName: !Ref AreaStatsTable }
         - DynamoDBCrudPolicy: { TableName: !Ref AreasTable }
-        - DynamoDBCrudPolicy: { TableName: !Ref AppStateTable }
+        - DynamoDBCrudPolicy: { TableName: !Ref StateTable }
+        - SNSPublishMessagePolicy: { TopicName: !GetAtt AlertTopic.TopicName }
         - Statement:
             - Effect: Allow
-              Action: dynamodb:Query
-              Resource: !Sub "${ReadingsTable.Arn}/index/byDay"
+              Action: bedrock-mantle:CreateInference
+              Resource: "*"
       Events:
-        Health: { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Path: /health, Method: GET } }
-        Areas: { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Path: /areas, Method: GET } }
-        AreaGet: { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Path: "/areas/{id}", Method: GET } }
-        AreaPut: { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Path: "/areas/{id}", Method: PUT } }
-        Readings: { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Path: /readings, Method: GET } }
-        Insights: { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Path: /insights, Method: GET } }
-        Actions: { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Path: /actions, Method: GET } }
-        ActionPut: { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Path: "/actions/{key}", Method: PUT } }
-        ConfigGet: { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Path: /config, Method: GET } }
-        ConfigPut: { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Path: /config, Method: PUT } }
+        Api: { Type: HttpApi, Properties: { ApiId: !Ref HttpApi } }  # catch-all; app.py routes
+        MorningBrief:
+          Type: ScheduleV2
+          Properties:
+            ScheduleExpression: "cron(30 6 * * ? *)"
+            ScheduleExpressionTimezone: Asia/Kolkata
 
-  AggregateFunction:
-    Type: AWS::Serverless::Function
+  # Dashboard hosting: private S3 bucket behind CloudFront (HTTPS).
+  SiteBucket:
+    Type: AWS::S3::Bucket
+  SiteOAC:
+    Type: AWS::CloudFront::OriginAccessControl
     Properties:
-      Handler: aggregate.handler
-      Timeout: 120
-      Policies:
-        - DynamoDBCrudPolicy: { TableName: !Ref AreaStatsTable }
-        - DynamoDBReadPolicy: { TableName: !Ref ReadingsTable }
-        - Statement:
-            - Effect: Allow
-              Action: dynamodb:Query
-              Resource: !Sub "${ReadingsTable.Arn}/index/byDay"
-      Events:
-        Nightly:
-          Type: Schedule
-          Properties: { Schedule: "cron(30 18 * * ? *)", Description: "Daily at 00:00 IST" }
+      OriginAccessControlConfig:
+        Name: !Sub "${AWS::StackName}-site"
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+  SiteCdn:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        DefaultRootObject: index.html
+        HttpVersion: http2
+        Origins:
+          - Id: site
+            DomainName: !GetAtt SiteBucket.RegionalDomainName
+            OriginAccessControlId: !Ref SiteOAC
+            S3OriginConfig: { OriginAccessIdentity: "" }
+        DefaultCacheBehavior:
+          TargetOriginId: site
+          ViewerProtocolPolicy: redirect-to-https
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6  # AWS managed CachingOptimized
+  SiteBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref SiteBucket
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal: { Service: cloudfront.amazonaws.com }
+            Action: s3:GetObject
+            Resource: !Sub "${SiteBucket.Arn}/*"
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${SiteCdn}"
 
 Outputs:
-  ModelBucketName:
-    Description: Upload model.json here (aws s3 cp ml/out/model.json s3://<this>/model.json)
-    Value: !Ref ModelBucket
   ApiUrl:
     Value: !Sub "https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com"
+  DashboardUrl:
+    Value: !Sub "https://${SiteCdn.DomainName}"
+  SiteBucketName:
+    Value: !Ref SiteBucket
+  DistributionId:
+    Value: !Ref SiteCdn

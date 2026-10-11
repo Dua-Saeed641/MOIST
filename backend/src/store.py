@@ -1,63 +1,50 @@
-"""Storage layer. MemoryStore for tests / local dev, DynamoStore for AWS (same interface)."""
+"""Storage. DynamoStore on AWS; FileStore for local runs and tests (same methods)."""
+import json
 import os
-from collections import defaultdict
+import threading
 from datetime import datetime, timezone
 from decimal import Decimal
 
-
-def day_of(ts_ms):
-    return datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
+DAY = 86_400_000
 
 
-def days_between(from_ms, to_ms):
-    out, d = [], from_ms - (from_ms % 86400000)
-    while d <= to_ms:
-        out.append(day_of(d))
-        d += 86400000
-    return out
+def day_of(ts):
+    return datetime.fromtimestamp(ts / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
 
 
-class MemoryStore:
-    def __init__(self):
-        self.readings = []  # dicts, kept sorted by ts on read
-        self.stats = {}  # (area_id, date) -> row
-        self.areas = {}
-        self.state = {}  # (kind, key) -> item
+class FileStore:
+    """Everything in memory, saved to one JSON file (or nowhere when path is None)."""
 
-    # readings
+    def __init__(self, path=None):
+        self.path, self.lock = path, threading.Lock()
+        data = json.load(open(path, encoding="utf-8")) if path and os.path.exists(path) else {}
+        self.readings = data.get("readings", [])
+        self.areas = data.get("areas", {})
+        self.state = data.get("state", {})
+
+    def _save(self):
+        if self.path:
+            with open(self.path, "w", encoding="utf-8") as f:
+                json.dump({"readings": self.readings, "areas": self.areas, "state": self.state}, f)
+
     def put_reading(self, r):
-        """Returns False if this reading (same area + timestamp) is already stored, so retries are harmless."""
-        if any(x["area_id"] == r["area_id"] and x["ts"] == r["ts"] for x in self.readings):
-            return False
-        self.readings.append(r)
-        return True
+        with self.lock:
+            if any(x["area_id"] == r["area_id"] and x["ts"] == r["ts"] for x in self.readings[-500:]):
+                return False  # a retry from the gateway
+            self.readings.append(r)
+            self.readings.sort(key=lambda x: x["ts"])
+            self._save()
+            return True
 
-    def query_readings(self, from_ms, to_ms, area_id=None, limit=5000):
-        rs = [r for r in self.readings if from_ms <= r["ts"] <= to_ms and (area_id is None or r["area_id"] == area_id)]
-        return sorted(rs, key=lambda r: r["ts"])[-limit:]
+    def put_readings(self, rs):
+        with self.lock:
+            self.readings += rs
+            self.readings.sort(key=lambda x: x["ts"])
+            self._save()
 
-    def recent_scores(self, area_id, n=30):
-        rs = sorted((r for r in self.readings if r["area_id"] == area_id), key=lambda r: r["ts"])[-n:]
-        return [r["moisture_score"] for r in rs]
+    def readings_between(self, frm, to, area_id=None):
+        return [r for r in self.readings if frm <= r["ts"] <= to and (area_id is None or r["area_id"] == area_id)]
 
-    # stats
-    def add_stats(self, area_id, date, d):
-        row = self.stats.setdefault((area_id, date), {"area_id": area_id, "date": date, "count": 0, "dry": 0,
-                                                      "unc": 0, "anomalies": 0, "sum_m": 0.0})
-        for k, v in d.items():
-            row[k] += v
-
-    def set_stats(self, area_id, date, row):
-        self.stats[(area_id, date)] = {"area_id": area_id, "date": date, **row}
-
-    def get_stats(self, from_date, to_date):
-        by = defaultdict(list)
-        for (a, d), row in sorted(self.stats.items(), key=lambda kv: kv[0][1]):
-            if from_date <= d <= to_date:
-                by[a].append(row)
-        return by
-
-    # areas
     def list_areas(self):
         return sorted(self.areas.values(), key=lambda a: a["name"])
 
@@ -65,25 +52,27 @@ class MemoryStore:
         return self.areas.get(area_id)
 
     def put_area(self, a):
-        self.areas[a["id"]] = a
+        with self.lock:
+            self.areas[a["id"]] = a
+            self._save()
 
-    # app state (actions, config)
     def get_state(self, kind, key):
-        return self.state.get((kind, key))
+        return self.state.get(f"{kind}/{key}")
 
     def put_state(self, kind, key, item):
-        self.state[(kind, key)] = {"kind": kind, "key": key, **item}
+        with self.lock:
+            self.state[f"{kind}/{key}"] = {"key": key, **item}
+            self._save()
 
     def list_state(self, kind):
-        return [v for (k, _), v in self.state.items() if k == kind]
+        return [v for k, v in self.state.items() if k.startswith(kind + "/")]
 
 
 def _dec(o):
-    """Floats -> Decimal for DynamoDB."""
     if isinstance(o, float):
         return Decimal(str(o))
     if isinstance(o, dict):
-        return {k: _dec(v) for k, v in o.items()}
+        return {k: _dec(v) for k, v in o.items() if v is not None}
     if isinstance(o, list):
         return [_dec(v) for v in o]
     return o
@@ -100,15 +89,13 @@ def _undec(o):
 
 
 class DynamoStore:
-    """Tables (see template.yaml): Readings(area_id, ts; GSI byDay(day, ts)), AreaStats(area_id, date),
-    Areas(area_id), AppState(kind, key)."""
+    """Tables (template.yaml): Readings(area_id, ts) + GSI byDay(day, ts), Areas(area_id), State(kind, key)."""
 
     def __init__(self):
-        import boto3  # imported lazily so tests run without it
+        import boto3
 
         db = boto3.resource("dynamodb")
         self.t_readings = db.Table(os.environ["READINGS_TABLE"])
-        self.t_stats = db.Table(os.environ["STATS_TABLE"])
         self.t_areas = db.Table(os.environ["AREAS_TABLE"])
         self.t_state = db.Table(os.environ["STATE_TABLE"])
 
@@ -116,71 +103,40 @@ class DynamoStore:
         from botocore.exceptions import ClientError
 
         try:
-            self.t_readings.put_item(Item=_dec({**r, "day": day_of(r["ts"])}), ConditionExpression="attribute_not_exists(area_id)")
+            self.t_readings.put_item(Item=_dec({**r, "day": day_of(r["ts"])}),
+                                     ConditionExpression="attribute_not_exists(area_id)")
             return True
         except ClientError as e:
             if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
                 return False
             raise
 
+    def put_readings(self, rs):
+        with self.t_readings.batch_writer(overwrite_by_pkeys=["area_id", "ts"]) as b:
+            for r in rs:
+                b.put_item(Item=_dec({**r, "day": day_of(r["ts"])}))
+
     def _query(self, **kw):
-        from_key, items, limit = None, [], kw.pop("limit")
-        while len(items) < limit:
-            if from_key:
-                kw["ExclusiveStartKey"] = from_key
+        items = []
+        while True:
             res = self.t_readings.query(**kw)
             items += res["Items"]
-            from_key = res.get("LastEvaluatedKey")
-            if not from_key:
-                break
-        return [_undec(i) for i in items[:limit]]
+            if "LastEvaluatedKey" not in res:
+                return items
+            kw["ExclusiveStartKey"] = res["LastEvaluatedKey"]
 
-    def query_readings(self, from_ms, to_ms, area_id=None, limit=5000):
+    def readings_between(self, frm, to, area_id=None):
         from boto3.dynamodb.conditions import Key
 
         if area_id:
-            items = self._query(KeyConditionExpression=Key("area_id").eq(area_id) & Key("ts").between(from_ms, to_ms),
-                                limit=limit)
+            items = self._query(KeyConditionExpression=Key("area_id").eq(area_id) & Key("ts").between(frm, to))
         else:
-            items = []
-            for day in days_between(from_ms, to_ms):
-                items += self._query(IndexName="byDay",
-                                     KeyConditionExpression=Key("day").eq(day) & Key("ts").between(from_ms, to_ms),
-                                     limit=limit)
-        return sorted(items, key=lambda r: r["ts"])[-limit:]
-
-    def recent_scores(self, area_id, n=30):
-        from boto3.dynamodb.conditions import Key
-
-        res = self.t_readings.query(KeyConditionExpression=Key("area_id").eq(area_id), ScanIndexForward=False, Limit=n)
-        return [float(i["moisture_score"]) for i in res["Items"]]
-
-    def add_stats(self, area_id, date, d):
-        self.t_stats.update_item(
-            Key={"area_id": area_id, "date": date},
-            UpdateExpression="ADD #c :c, dry :d, unc :u, anomalies :a, sum_m :s",
-            ExpressionAttributeNames={"#c": "count"},
-            ExpressionAttributeValues=_dec({":c": d["count"], ":d": d["dry"], ":u": d["unc"],
-                                            ":a": d["anomalies"], ":s": d["sum_m"]}),
-        )
-
-    def set_stats(self, area_id, date, row):
-        self.t_stats.put_item(Item=_dec({"area_id": area_id, "date": date, **row}))
-
-    def get_stats(self, from_date, to_date):
-        from boto3.dynamodb.conditions import Attr
-
-        items, kw = [], {"FilterExpression": Attr("date").between(from_date, to_date)}
-        while True:
-            res = self.t_stats.scan(**kw)
-            items += res["Items"]
-            if "LastEvaluatedKey" not in res:
-                break
-            kw["ExclusiveStartKey"] = res["LastEvaluatedKey"]
-        by = defaultdict(list)
-        for i in sorted((_undec(i) for i in items), key=lambda i: i["date"]):
-            by[i["area_id"]].append(i)
-        return by
+            # ponytail: one query per day partition; precompute daily stats if a range ever holds >100k readings
+            items, d = [], frm - frm % DAY
+            while d <= to:
+                items += self._query(IndexName="byDay", KeyConditionExpression=Key("day").eq(day_of(d)) & Key("ts").between(frm, to))
+                d += DAY
+        return sorted((_undec(i) for i in items), key=lambda r: r["ts"])
 
     def list_areas(self):
         items, kw = [], {}
@@ -190,14 +146,14 @@ class DynamoStore:
             if "LastEvaluatedKey" not in res:
                 break
             kw["ExclusiveStartKey"] = res["LastEvaluatedKey"]
-        return sorted((_undec(i) | {"id": i["area_id"]} for i in items), key=lambda a: a["name"])
+        return sorted((_undec(i) for i in items), key=lambda a: a["name"])
 
     def get_area(self, area_id):
-        i = self.t_areas.get_item(Key={"area_id": area_id}).get("Item")
-        return (_undec(i) | {"id": i["area_id"]}) if i else None
+        i = self.t_areas.get_item(Key={"id": area_id}).get("Item")
+        return _undec(i) if i else None
 
     def put_area(self, a):
-        self.t_areas.put_item(Item=_dec({**a, "area_id": a["id"]}))
+        self.t_areas.put_item(Item=_dec(a))
 
     def get_state(self, kind, key):
         i = self.t_state.get_item(Key={"kind": kind, "key": key}).get("Item")

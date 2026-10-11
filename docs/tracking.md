@@ -1,99 +1,57 @@
-# What the glove tracks (for the dashboard)
+# What the glove tracks, and the API the dashboard reads
 
-This page covers what each reading contains, where each field comes from, and what the dashboard can show from it.
-Hardware details are in [`../hardware.md`](../hardware.md).
+Hardware details are in [`../hardware.md`](../hardware.md). How to run and deploy is in [`../README.md`](../README.md).
 
-## How a reading travels
+## How a check travels
 
 ```
-Glove (Arduino)  --USB serial, 1 JSON line-->  Gateway (laptop/phone)  --HTTPS POST /readings-->  API + DB  --GET /readings-->  Dashboard
-     sensor fields                           + timestamp, lat/lon, area_id          + id, class check, anomaly
+Glove (Arduino) --USB serial, 1 JSON line--> gateway/gateway.py --POST /readings--> API Gateway -> Lambda -> DynamoDB
+                                             + area_id, timestamp                    + class, certainty, anomaly
+Dashboard (web/) <--GET /live every 2 s, /overview every 15 s-- Lambda
 ```
 
-A reading is created when the worker holds the glove at the right distance from one waste item. Each reading describes **one item**, not a whole bin.
+One check = one waste item. It is created when the worker holds the glove ~12 cm over an item and the servo arm taps it.
 
-## Fields
+## Fields of one check
 
-### From the glove (Arduino serial line)
+| Field | From | Meaning |
+|---|---|---|
+| `device_id` | glove | which glove (`glove-01`; simulated gloves are `sim-*`) |
+| `moisture_raw` | glove | probe ADC value, median of 7 samples (dry ≈ 990, wet ≈ 800) |
+| `moisture_slope` | glove | change during the 0.7 s of contact |
+| `moisture_score` | glove | 0 = dry … 1 = wet (server computes it from raw if missing) |
+| `air_temp_c`, `air_rh_pct` | glove | DHT11; absent when the read failed |
+| `gas_raw` | glove | gas sensor, only if fitted |
+| `distance_cm` | glove | sonar distance when the arm tapped (≈ 12) |
+| `area_id`, `timestamp` → `ts` | gateway | where and when (epoch ms) |
+| `id` | API | `device_id-ts`, so a retried upload is not stored twice |
+| `class` | API | `dry` (score ≤ 0.38), `wet` (≥ 0.62), else `uncertain`. Same cut-offs as the glove |
+| `certainty` | API | 0.5 on the fence … 1.0 at either end |
+| `anomaly`, `anomaly_reason` | API | untrusted check: `Probe shorted (metal?)` when raw < 300, `High gas level` when gas > 600 |
 
-| Field | Type | Meaning | Range / example |
-|---|---|---|---|
-| `device_id` | string | which glove | `"glove-01"` |
-| `moisture_raw` | int | probe reading (median of 7 samples) | 0 to 1023, calibration-dependent |
-| `moisture_slope` | int | change in the raw value during the 0.7 s of contact (helps the ML model) | about -200 to 200 |
-| `moisture_score` | float | normalised wetness | **0 = dry … 1 = wet** |
-| `class` | string | on-device verdict | `"wet"` / `"dry"` / `"uncertain"` (cut-offs 0.38 / 0.62, same as `web/src/config.ts`) |
-| `air_temp_c` | float or null | air temperature | about 15 to 45 |
-| `air_rh_pct` | float or null | air humidity | 20 to 95 |
-| `gas_raw` | int or null | gas/aux sensor, if fitted | 0 to 1023, relative only |
-| `distance_cm` | int | sonar distance at the moment of measurement | usually about 12 |
+Untrusted checks are counted, listed on **Alerts** and e-mailed through SNS, but kept out of dry share, moisture and ESI.
 
-`null` means the sensor wasn't fitted or the read failed. Show it as "—", not as 0.
-Lines starting with `#` are status messages, not readings. The gateway should skip them.
+## Per-area numbers (backend/src/logic.py)
 
-### Added by the gateway
+- **Dry share**, **mean moisture**, **unsure share** over the selected range (24h / 7d / 30d).
+- **ESI** = 100 × (0.5·(1 − mean moisture) + 0.3·dry share + 0.2·(1 − unsure share)), from the report section 9.5.
+- **Trend**: dry share in the second half of the range minus the first half.
+- **Status** (needs ≥ 5 checks): `inspect` (≥ 8% untrusted) → `wet` (dry share < 30%) → `pickup` (ESI ≥ 70) → `watch` (≥ 4% untrusted or dry share fell ≥ 8 pts) → `ok`. Fewer checks = `idle`.
+- Each status maps to one action (send to energy plant, segregation drive, inspection, watch).
 
-| Field | Meaning |
-|---|---|
-| `timestamp` / `ts` | UTC time the reading arrived |
-| `lat`, `lon` | phone GPS |
-| `area_id` | collection point / colony picked by the worker (matches `Area.id`) |
-
-### Added by the backend
-
-| Field | Meaning |
-|---|---|
-| `id` | unique reading id |
-| `class`, `moisture_score` | may be recomputed by the ML model instead of the on-device threshold |
-| `anomaly` | true when the reading is unusual (for example, a sudden jump in moisture or gas) |
-
-## What the dashboard already uses
-
-`web/src/types.ts` → `Reading`, mapped in `web/src/data/http.ts`:
-
-| Dashboard field | API field |
-|---|---|
-| `moistureRaw` | `moisture_raw` |
-| `moistureScore` | `moisture_score` |
-| `cls` | `class` |
-| `anomaly` | `anomaly` |
-| `airTempC` | `air_temp_c` |
-| `airRhPct` | `air_rh_pct` |
-| `deviceId`, `areaId`, `ts`, `id` | `device_id`, `area_id`, `ts`, `id` |
-| `distanceCm` | `distance_cm` (shown in "Latest checks" → Expand) |
-| `gasRaw` | `gas_raw` (shown in "Latest checks" → Expand; "—" when not fitted) |
-
-## Ideas not built yet
-
-| Field | Idea |
-|---|---|
-| `gas_raw` | per-area average and trend. High gas together with wet means rotting organic waste, so flag it. Hide it if every value is null |
-| `moisture_slope` | mostly for the ML model. Could appear in the reading detail view |
-| `distance_cm` | quality check: readings far from the usual ~12 cm are less reliable. Could be shown as a small "confidence" indicator |
-
-To add a field, put it in `Reading` in `types.ts`, in `ApiReading` and `toReading` in `http.ts` (use `?? null`), and in `makeReading` in `data/sample.ts` so the simulated feed has it too.
-
-## The local API (gateway/gateway.py)
-
-For the demo, the gateway on the laptop **is** the backend. It reads the glove over USB and serves the API on `http://localhost:8787`:
+## API
 
 | Method | Path | Returns |
 |---|---|---|
-| GET | `/areas` | `{"areas": [area]}`: the one area set by `--area-name/--lat/--lon` |
-| GET | `/readings?from=<ms>&limit=<n>` | `{"readings": [...]}`, oldest first |
-| GET | `/actions` | `{"actions": {key: state}}` |
-| PUT | `/actions/<key>` | body `{"state": "open" \| "scheduled" \| "done"}` |
+| POST | `/readings` | one check or a list of up to 500. Header `x-api-key`. Unknown `area_id` → 400 |
+| GET | `/live?since=<ms>` | `{now, readings (newest first, max 50), devices, today}` |
+| GET | `/overview?range=24h\|7d\|30d` | `{kpis, previous (same KPIs for the period before), areas[] with stats + recommendation + rank, trend[], brief}` |
+| GET | `/areas/<id>?range=` | one area + `trend` + 25 `recent` checks |
+| PUT | `/areas/<id>` | `{name, ward, kind, lat, lon}`. Header `x-api-key`. The gateway does this on start |
+| GET | `/alerts?range=` | untrusted checks, newest first |
+| GET / PUT | `/actions`, `/actions/<area_id>:<status>` | officer's action queue, `{state: open\|scheduled\|done}` |
+| GET / POST | `/brief` | morning dispatch brief; POST regenerates (max once a minute) |
 
-`anomaly` is set by the gateway when `moisture_raw < 300`. That's far below any real wet reading (~650+) and usually means metal is shorting the probe. The AWS backend can replace this with the Isolation Forest later, keeping the same API.
+## The morning brief
 
-## Metrics built from these (already in `web/src/lib/metrics.ts`)
-
-- **Dry fraction** per area: share of readings classed dry.
-- **Mean moisture** per area.
-- **ESI** (Energy Suitability Index) = w1·(1 − mean moisture) + w2·dry fraction + w3·(1 − uncertain fraction).
-- **Anomaly share**, and the **trend** (change in dry fraction over the selected range).
-- Status colours, ranking and recommended actions are based on these.
-
-## Testing without the glove
-
-Leave `VITE_API_URL` empty in `web/.env`. The dashboard then uses the simulated feed in `web/src/data/sample.ts`, which produces the same fields.
+`backend/src/brief.py` sends the per-area numbers (not raw checks) to Claude on Amazon Bedrock and asks for a short plain-text brief for the officer. The model only explains numbers we computed; it never decides a class. It runs every day at 06:30 IST (EventBridge Scheduler) and is e-mailed through SNS. Without Bedrock access it falls back to a rule-based brief, and the dashboard says which one you are reading.
