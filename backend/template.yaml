@@ -1,0 +1,187 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: MOIST - moisture-sensing glove ingest, area analytics API and nightly aggregation.
+
+Parameters:
+  WriteApiKey:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: Shared secret for write endpoints (x-api-key). Empty disables the check (local only).
+
+  AlertEmail:
+    Type: String
+    Default: ""
+    Description: Optional. E-mail address that receives an alert whenever an unusual reading is detected.
+
+  PermissionsBoundaryArn:
+    Type: String
+    AllowedPattern: "^arn:aws:iam::[0-9]{12}:policy/.+$"
+    ConstraintDescription: Must be the ARN of an IAM policy, like arn:aws:iam::123456789012:policy/moist-boundary
+    Description: IAM policy used as the permissions boundary for every role this stack creates (the CloudFormation service role requires it).
+
+Conditions:
+  HasAlertEmail: !Not [!Equals [!Ref AlertEmail, ""]]
+
+Globals:
+  Function:
+    Runtime: python3.12
+    CodeUri: src/
+    PermissionsBoundary: !Ref PermissionsBoundaryArn
+    Timeout: 15
+    MemorySize: 256
+    Environment:
+      Variables:
+        READINGS_TABLE: !Ref ReadingsTable
+        STATS_TABLE: !Ref AreaStatsTable
+        AREAS_TABLE: !Ref AreasTable
+        STATE_TABLE: !Ref AppStateTable
+        MODEL_BUCKET: !Ref ModelBucket
+        WRITE_API_KEY: !Ref WriteApiKey
+
+Resources:
+  ReadingsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: area_id, AttributeType: S }
+        - { AttributeName: ts, AttributeType: N }
+        - { AttributeName: day, AttributeType: S }
+      KeySchema:
+        - { AttributeName: area_id, KeyType: HASH }
+        - { AttributeName: ts, KeyType: RANGE }
+      GlobalSecondaryIndexes:
+        - IndexName: byDay
+          KeySchema:
+            - { AttributeName: day, KeyType: HASH }
+            - { AttributeName: ts, KeyType: RANGE }
+          Projection: { ProjectionType: ALL }
+
+  AreaStatsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: area_id, AttributeType: S }
+        - { AttributeName: date, AttributeType: S }
+      KeySchema:
+        - { AttributeName: area_id, KeyType: HASH }
+        - { AttributeName: date, KeyType: RANGE }
+
+  AreasTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: area_id, AttributeType: S }
+      KeySchema:
+        - { AttributeName: area_id, KeyType: HASH }
+
+  # Action-queue status and dashboard config (thresholds, ESI weights).
+  AppStateTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: kind, AttributeType: S }
+        - { AttributeName: key, AttributeType: S }
+      KeySchema:
+        - { AttributeName: kind, KeyType: HASH }
+        - { AttributeName: key, KeyType: RANGE }
+
+  ModelBucket:
+    Type: AWS::S3::Bucket
+
+  AlertTopic:
+    Type: AWS::SNS::Topic
+
+  AlertSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasAlertEmail
+    Properties:
+      TopicArn: !Ref AlertTopic
+      Protocol: email
+      Endpoint: !Ref AlertEmail
+
+  HttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      # Caps request volume for every route, so a leaked URL or a runaway client cannot run up usage.
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: 20
+        ThrottlingRateLimit: 10
+      CorsConfiguration:
+        AllowOrigins: ["*"]
+        AllowHeaders: [content-type, x-api-key]
+        AllowMethods: [GET, POST, PUT, OPTIONS]
+
+  IngestFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: ingest.handler
+      Environment:
+        Variables:
+          ALERT_TOPIC_ARN: !Ref AlertTopic
+      Policies:
+        - SNSPublishMessagePolicy: { TopicName: !GetAtt AlertTopic.TopicName }
+        - DynamoDBCrudPolicy: { TableName: !Ref ReadingsTable }
+        - DynamoDBCrudPolicy: { TableName: !Ref AreaStatsTable }
+        - DynamoDBReadPolicy: { TableName: !Ref AreasTable }
+        - S3ReadPolicy: { BucketName: !Ref ModelBucket }
+      Events:
+        Post:
+          Type: HttpApi
+          Properties: { ApiId: !Ref HttpApi, Path: /readings, Method: POST }
+        Batch:
+          Type: HttpApi
+          Properties: { ApiId: !Ref HttpApi, Path: /readings/batch, Method: POST }
+
+  AreasFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: api.handler
+      Policies:
+        - DynamoDBReadPolicy: { TableName: !Ref ReadingsTable }
+        - DynamoDBReadPolicy: { TableName: !Ref AreaStatsTable }
+        - DynamoDBCrudPolicy: { TableName: !Ref AreasTable }
+        - DynamoDBCrudPolicy: { TableName: !Ref AppStateTable }
+        - Statement:
+            - Effect: Allow
+              Action: dynamodb:Query
+              Resource: !Sub "${ReadingsTable.Arn}/index/byDay"
+      Events:
+        Health: { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Path: /health, Method: GET } }
+        Areas: { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Path: /areas, Method: GET } }
+        AreaGet: { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Path: "/areas/{id}", Method: GET } }
+        AreaPut: { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Path: "/areas/{id}", Method: PUT } }
+        Readings: { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Path: /readings, Method: GET } }
+        Insights: { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Path: /insights, Method: GET } }
+        Actions: { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Path: /actions, Method: GET } }
+        ActionPut: { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Path: "/actions/{key}", Method: PUT } }
+        ConfigGet: { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Path: /config, Method: GET } }
+        ConfigPut: { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Path: /config, Method: PUT } }
+
+  AggregateFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: aggregate.handler
+      Timeout: 120
+      Policies:
+        - DynamoDBCrudPolicy: { TableName: !Ref AreaStatsTable }
+        - DynamoDBReadPolicy: { TableName: !Ref ReadingsTable }
+        - Statement:
+            - Effect: Allow
+              Action: dynamodb:Query
+              Resource: !Sub "${ReadingsTable.Arn}/index/byDay"
+      Events:
+        Nightly:
+          Type: Schedule
+          Properties: { Schedule: "cron(30 18 * * ? *)", Description: "Daily at 00:00 IST" }
+
+Outputs:
+  ModelBucketName:
+    Description: Upload model.json here (aws s3 cp ml/out/model.json s3://<this>/model.json)
+    Value: !Ref ModelBucket
+  ApiUrl:
+    Value: !Sub "https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com"
