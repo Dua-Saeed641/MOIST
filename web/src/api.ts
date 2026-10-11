@@ -73,7 +73,7 @@ export interface Point {
 
 export interface Brief {
   text: string;
-  source: "bedrock" | "rules";
+  source: "openrouter" | "bedrock" | "rules";
   model?: string;
   generated: number;
 }

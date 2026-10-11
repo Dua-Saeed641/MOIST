@@ -1,1 +1,1 @@
-anthropic[bedrock]
+boto3

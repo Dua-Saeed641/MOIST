@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { ago, api, type Brief } from "../api";
 import { Card, Icon } from "../components/ui";
 
-/** The morning dispatch brief, written by Claude on Amazon Bedrock from the computed area numbers. */
+/** The morning dispatch brief, written by an LLM from the computed area numbers (rule-based when no AI answers). */
 export default function BriefCard({ initial }: { initial: Brief | null }) {
   const [brief, setBrief] = useState<Brief | null>(initial);
   const [busy, setBusy] = useState(false);
@@ -34,7 +34,7 @@ export default function BriefCard({ initial }: { initial: Brief | null }) {
             {lines.map((l, i) => l.startsWith("- ") ? <p key={i} className="brief-item">{l.slice(2)}</p> : <p key={i}>{l}</p>)}
           </div>
           <div className="brief-meta">
-            {brief.source === "bedrock" ? <>Written by Claude on Amazon Bedrock</> : <>Rule-based summary (Bedrock not connected)</>}
+            {brief.source === "rules" ? <>Rule-based summary (AI not reachable)</> : <>Written by AI · {brief.model}</>}
             {" · "}{ago(brief.generated)}
           </div>
         </>

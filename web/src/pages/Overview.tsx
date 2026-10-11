@@ -70,7 +70,7 @@ export default function Overview({ range }: { range: Range }) {
           <h2>Gloves check every item for moisture. This dashboard turns those readings into collection decisions.</h2>
           <ol className="intro-steps">
             <li><Icon name="glove" size={18} /><div><strong>Measure</strong><span>A probe on the glove reads each item: wet, dry or unsure.</span></div></li>
-            <li><Icon name="cloud" size={18} /><div><strong>Score</strong><span>AWS rates each collection point (ESI); Claude on Bedrock explains it.</span></div></li>
+            <li><Icon name="cloud" size={18} /><div><strong>Score</strong><span>AWS rates each collection point (ESI); an AI assistant explains it.</span></div></li>
             <li><Icon name="factory" size={18} /><div><strong>Act</strong><span>Dry points go to the energy plant; wet ones get a segregation drive.</span></div></li>
           </ol>
         </div>

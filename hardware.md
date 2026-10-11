@@ -48,9 +48,8 @@ Keep the hand still while the arm taps (about 1.5 s). After a reading, move the 
 | **Broken** MH-sensor module (its black sensor snapped off) | **becomes the moisture board** | See "Making the probe" below |
 | MH-sensor module with the golden cylinder | optional, logged as `gas_raw` | Read the text printed on it. If it says **MQ-xxx** it's a gas sensor, so keep it. If it says **SW-420** it's a vibration switch: set `HAS_AUX = false` and leave it off |
 | Buzzer | metal-detector beeping | Longer leg / `+` goes to D3 |
-| Servo SG90 | **probe arm**: swings the probe onto the item and back | Powered from the power module, **not** the Arduino |
+| Servo SG90 | **probe arm**: swings the probe onto the item and back | Powered from the Arduino 5V rail (see the power note below) |
 | LEDs: green, red, yellow, blue | result and status | Each needs a **220 Ω** resistor (red-red-brown) |
-| Power module MB102 (yellow/black) | 5V for the matrix, servo, sonar and DHT | Set both jumpers to **5V**. Power it with a USB power bank or a 9V adapter |
 | Breadboard and jumper wires | wiring | |
 | Not used | stepper motor (heavier and slower than the servo for this job, and needs a driver board), RGB LED, PIR motion sensor (see above), capacitors | |
 
@@ -71,10 +70,10 @@ Keep the hand still while the arm taps (about 1.5 s). After a reading, move the 
 | D12 | matrix DIN | | | |
 
 **Power rails**
-- **Top rails** (power module 5V): matrix VCC, servo red, HC-SR04 VCC, DHT11 VCC.
-- **Bottom rails** (Arduino 5V): golden module VCC. The moisture board gets its power from A1 instead.
-- **All GNDs connect together.** Run one wire from the power-module GND rail to the Arduino GND rail. Without this shared ground, the matrix and servo will behave erratically.
-- No power module? Connect the top + rail to the Arduino 5V and unplug the servo. The Arduino can't supply the servo's current.
+- **Everything runs from the Arduino 5V pin** (USB from the laptop). There is no separate power module.
+- **Bottom rails:** Arduino 5V → + rail, Arduino GND → − rail. Golden module VCC goes here. The moisture board gets its power from A1 instead.
+- **Top rails:** one jumper joins the top + rail to the bottom + rail, and one joins the top − rail to the bottom − rail. Matrix VCC, servo red, HC-SR04 VCC and DHT11 VCC go on the top rails.
+- If the Arduino resets whenever the servo moves, the USB port can't supply enough current: power the servo from a separate 5V source and join its GND to the Arduino GND.
 
 > **What happened on our build (2026-10-10):** with the MB102 power module plugged into the breadboard, its pins joined the + and − rails. Plugging the Arduino 5V into the + rail then shorted it, and the Arduino dropped off USB. It works with the module **removed**, and every rail is powered from the **Arduino 5V pin** (plus one wire from the − rail to Arduino GND). Before using the module again, test it off the breadboard: with an LED and a resistor, check that its printed **+** really matches the breadboard's red stripe.
 
@@ -107,7 +106,7 @@ The MH-sensor boards all share the same circuit: the sensor sits on two pads and
 4. Add the HC-SR04. Move your hand in front of it and the numbers should change.
 5. Add the LEDs and buzzer.
 6. Add the DHT11 and the moisture board with the probe.
-7. Add the power module and servo last.
+7. Add the servo last.
 8. Open Serial Monitor at **115200 baud**. Each reading prints one line like:
    `{"device_id":"glove-01","moisture_raw":412,"moisture_slope":-18,"moisture_score":0.905,"class":"wet","air_temp_c":29.0,"air_rh_pct":61.0,"gas_raw":188,"distance_cm":12}`
 
@@ -150,5 +149,5 @@ Measured calibration on our probe: dry paper or air **970–1023**, wet sponge o
 
 - Servo and arm on the back of the hand, with the HC-SR04 beside them (see "Making the servo arm").
 - Matrix and LEDs on the wrist, where they're easy to see.
-- Arduino, breadboard and power module in a pouch on the forearm. Keep the DHT11 in a vented opening.
+- Arduino and breadboard in a pouch on the forearm. Keep the DHT11 in a vented opening.
 - Run the probe wires along the stick with tape, away from the palm. Wipe the probe between uses.

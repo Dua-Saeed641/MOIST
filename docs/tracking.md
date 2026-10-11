@@ -54,4 +54,4 @@ Untrusted checks are counted, listed on **Alerts** and e-mailed through SNS, but
 
 ## The morning brief
 
-`backend/src/brief.py` sends the per-area numbers (not raw checks) to Claude on Amazon Bedrock and asks for a short plain-text brief for the officer. The model only explains numbers we computed; it never decides a class. It runs every day at 06:30 IST (EventBridge Scheduler) and is e-mailed through SNS. Without Bedrock access it falls back to a rule-based brief, and the dashboard says which one you are reading.
+`backend/src/brief.py` sends the per-area numbers (not raw checks) to a language model and asks for a short plain-text brief for the officer (`POST /ask` does the same for free-text questions). It tries OpenRouter (one attempt per key, free models), then Amazon Nova 2 Lite on Bedrock. The model only explains numbers we computed; it never decides a class. It runs every day at 06:30 IST (EventBridge Scheduler) and is e-mailed through SNS. If no model answers it falls back to a rule-based brief, and the dashboard says which one you are reading.

@@ -49,25 +49,20 @@ for p, x in BOT.items():
 TOP_PIN_Y, BOT_PIN_Y = 481, 689
 
 # ---------------- rails ----------------
-RT5, RTG = 60, 85          # top rails, fed by the power module
+RT5, RTG = 60, 85          # top rails, joined to the bottom rails (all power from Arduino 5V)
 RB5, RBG = 1000, 1025      # bottom rails, fed by Arduino 5V
-line([(150, RT5), (1440, RT5)], RED, 4); line([(150, RTG), (1440, RTG)], BLK, 4)
-text(1445, RT5, "+5V  (power module)", 8.5, ha="left", color=RED, weight="bold")
-text(1445, RTG, "GND", 8.5, ha="left", weight="bold")
-line([(700, RB5), (1440, RB5)], RED, 4); line([(700, RBG), (1440, RBG)], BLK, 4)
-text(1445, RB5, "+5V  (Arduino)", 8.5, ha="left", color=RED, weight="bold")
-text(1445, RBG, "GND", 8.5, ha="left", weight="bold")
+line([(150, RT5), (1465, RT5)], RED, 4); line([(150, RTG), (1440, RTG)], BLK, 4)
+text(1475, RT5, "+5V", 8.5, ha="left", color=RED, weight="bold")
+text(1475, RTG, "GND", 8.5, ha="left", weight="bold")
+line([(700, RB5), (1465, RB5)], RED, 4); line([(700, RBG), (1440, RBG)], BLK, 4)
+text(1475, RB5, "+5V  (Arduino 5V)", 8.5, ha="left", color=RED, weight="bold")
+text(1475, RBG, "GND  (Arduino)", 8.5, ha="left", weight="bold")
 line([(BOT["5V"], BOT_PIN_Y), (BOT["5V"], RB5)], RED); dot(BOT["5V"], RB5, RED)
 line([(BOT["GND"], BOT_PIN_Y), (BOT["GND"], RBG)], BLK); dot(BOT["GND"], RBG)
-# common ground: Arduino GND <-> power-module GND
+# top rails are fed from the bottom rails: one jumper for +5V, one for GND (right edge)
+line([(1465, RT5), (1465, RB5)], RED, 3); dot(1465, RT5, RED); dot(1465, RB5, RED)
 line([(1440, RTG), (1440, RBG)], BLK, 3); dot(1440, RTG); dot(1440, RBG)
-text(1432, 560, "COMMON GND\n(must connect!)", 8.5, ha="right", weight="bold")
-
-# power module (MB102)
-box(15, 140, 25, 120, "#f2c200", "POWER\nMODULE", tc=BLK, size=9)
-text(77, 88, "MB102 yellow/black\njumpers on 5V", 6.5)
-line([(140, RT5), (150, RT5)], RED, 4); line([(140, RTG), (150, RTG)], BLK, 4)
-text(77, 140, "in: USB power bank\nor 9V barrel jack", 7.5)
+text(1432, 560, "JOIN TOP + BOTTOM\nRAILS (+5V and GND)", 8.5, ha="right", weight="bold")
 
 def rail_pin(x, y_top, net, label):
     ry = RT5 if net == "5V" else RTG
@@ -212,7 +207,7 @@ D6  servo SIG (orange)
 D7  green LED  (+220 ohm)  5V  -> bottom + rail
 D8  red LED    (+220 ohm)  GND -> bottom - rail
 D9  yellow LED (+220 ohm)
-D10 matrix CLK             power module 5V -> top rails
+D10 matrix CLK             top rails <- bottom rails
 D11 matrix CS
 D12 matrix DIN"""
 text(30, 778, pins, 8.6, ha="left", va="top", family="monospace")
@@ -222,8 +217,10 @@ line([(140, ly0), (180, ly0)], BLK, 3.5); text(188, ly0, "GND", 8.5, ha="left")
 line([(250, ly0), (290, ly0)], "#1f77b4", 2.5); text(298, ly0, "signal", 8.5, ha="left")
 dot(375, ly0); text(385, ly0, "= joined.  Crossing without a dot = NOT joined", 8.5, ha="left")
 tips = """- LED: long leg (+) to the resistor side, short leg (-) to GND.
-- Power-module GND and Arduino GND MUST be joined (right edge).
-- Servo gets 5V from the power module, never from the Arduino.
+- Everything runs from the Arduino 5V over USB. No power module
+  (the MB102 was removed: it shorted the rails).
+- If the board resets when the servo moves, give the servo its own
+  5V supply and join its GND to the Arduino GND.
 - Unplug USB before changing any wire.
 - Not used: stepper, RGB LED, PIR motion sensor, capacitors."""
 text(30, 975, tips, 8.6, ha="left", va="top")

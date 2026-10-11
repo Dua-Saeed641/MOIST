@@ -19,7 +19,7 @@ function GloveStatus({ live }: { live: Omit<Live, "readings"> | null }) {
   const real = live?.devices.filter((d) => !isSim(d.id)) ?? [];
   const glove = real[0];
   const online = glove && live && live.now - glove.last_seen < ONLINE_MS;
-  const gw = usePoll<{ configured: boolean; online?: boolean; glove_connected?: boolean }>("/gateway", 15000).data;
+  const gw = usePoll<{ configured: boolean; online?: boolean; glove_connected?: boolean }>("/gateway", 30000).data;
   return (
     <div className="glove-card">
       <SkyGradient className="glove-sky" style={{ aspectRatio: "auto", height: "100%", position: "absolute", inset: 0 }} speed={14} />

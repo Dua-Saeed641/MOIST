@@ -6,7 +6,7 @@ You will end up with:
 
 ```
  Glove ──USB──> Laptop gateway ──HTTPS──> API Gateway ──> Lambda ──> DynamoDB
-                     ▲                                     │  ├──> Amazon Bedrock (Claude)
+                     ▲                                     │  ├──> LLM (OpenRouter / Bedrock)
                      │                                     │  └──> SNS (e-mail alerts)
                      └──── ngrok tunnel <── GET /status ───┘
                                                     EventBridge (06:30 brief) ──> Lambda
@@ -31,7 +31,7 @@ Keep a scratch note with these. You fill them in as you go.
 | `SiteBucketName` | output of `sam deploy` | `moist-sitebucket-1a2b3c` |
 | `DistributionId` | output of `sam deploy` | `E2ABCDEF123456` |
 
-Never commit the two secrets. `samconfig.toml` stores them and is already in `.gitignore`.
+Never commit the secrets (the two generated ones and your OpenRouter keys). `samconfig.toml` and `backend/.env` store them and are already in `.gitignore`.
 
 ---
 
@@ -66,6 +66,9 @@ ngrok version      # already installed on this laptop
    Open the user → Security credentials → **Create access key** → *Command Line Interface (CLI)* → copy the key ID and secret.
 4. Configure the CLI:
 
+   If PowerShell says `aws` is not recognized right after installing, open a new window or call it by its full path:
+   `& "C:\Program Files\Amazon\AWSCLIV2\aws.exe" configure` (note the `&`).
+
    ```powershell
    aws configure
    # AWS Access Key ID:     <key id>
@@ -77,24 +80,24 @@ ngrok version      # already installed on this laptop
 
    Delete this access key after the hackathon (IAM → user → Security credentials → Deactivate/Delete).
 
-## 3. Turn on Claude in Amazon Bedrock
+## 3. AI provider: OpenRouter keys (Bedrock as fallback)
 
-The AI features (morning brief and the AI assistant page) call **Claude Opus 5.5** in **us-east-1**. Your stack runs in Mumbai and calls Bedrock across regions. That is set by the `BedrockRegion` parameter.
+The morning brief and the AI assistant page call a large language model from the Lambda. The model only turns figures the system has already computed into plain language; it never classifies waste. `backend/src/brief.py` tries, in order:
 
-1. Switch the console region to **US East (N. Virginia) us-east-1**.
-2. Open **Amazon Bedrock** → **Model catalog** → search **Claude Opus 5.5** (provider Anthropic).
-3. If the page asks for access or for Anthropic's *use case details* form, submit it. Approval is usually instant.
-4. Back in the catalog, open the model and try it in the **Playground** with a short prompt. If it answers, the model is enabled for your account.
+1. **OpenRouter**, once per key in the `OpenRouterKeys` parameter (comma-separated). If a key is rate-limited or out of credit, the next key is tried. Each call names three free models, and OpenRouter falls back across them: `nvidia/nemotron-3-super-120b-a12b:free`, then `google/gemma-4-31b-it:free`, then `google/gemma-4-26b-a4b-it:free`.
+2. **Amazon Bedrock**, Amazon Nova 2 Lite (`us.amazon.nova-2-lite-v1:0`), when the account has Bedrock quota.
+3. A **rule-based brief**, so the dashboard always shows something. Questions return "AI busy" instead.
 
-Nothing else is needed: the stack's Lambda role already has permission to call Bedrock.
+**Get OpenRouter keys:** sign in at <https://openrouter.ai> → **Keys** → **Create key**. Free-tier keys work with `:free` models but are rate-limited (about 50 requests a day per key without credit), so add two or three keys, or put a few dollars of credit on one.
 
-## 3b. Reserve a fixed ngrok address
+**Bedrock (optional):** new AWS accounts often have a Bedrock token quota of **0**. Check: Service Quotas → Amazon Bedrock → search *Nova 2 Lite*. If *Cross-region model inference tokens per minute* is 0, click **Request increase**. If the daily-token quota is also 0, open a Support case (*Service limit increase → Amazon Bedrock*). Nothing needs redeploying once the quota is raised.
 
-A free ngrok account includes one **static domain**, so the address never changes and you set it in AWS only once.
+## 3b. ngrok address
 
-1. Sign in at <https://dashboard.ngrok.com> (this laptop already has an authtoken configured; check with `ngrok config check`).
-2. **Domains** (or *Universal Gateway → Domains*) → **New Domain** / claim your free static domain.
-3. Copy it as `NGROK_URL`, with `https://` in front.
+Free ngrok accounts get one fixed domain, so the address stays the same between restarts.
+
+1. Sign in at <https://dashboard.ngrok.com> and run the `ngrok config add-authtoken ...` command it shows (this laptop already has one; check with `ngrok config check`).
+2. Run `ngrok http 8790` once. The `Forwarding` line shows your address, e.g. `https://something.ngrok-free.dev`. That is `NGROK_URL`.
 
 ## 4. Generate the two secrets
 
@@ -122,6 +125,7 @@ Answer the prompts:
 | Parameter WriteApiKey | your `WRITE_API_KEY` |
 | Parameter AlertEmail | your e-mail (for fault alerts and the 06:30 brief), or leave empty |
 | Parameter BedrockRegion | `us-east-1` (press Enter) |
+| Parameter OpenRouterKeys | your OpenRouter keys, comma-separated (input is hidden) |
 | Parameter GatewayUrl | your `NGROK_URL`, e.g. `https://lovekesh-moist.ngrok-free.app` |
 | Parameter GatewayToken | your `GATEWAY_TOKEN` |
 | Confirm changes before deploy | `y` |
@@ -169,11 +173,18 @@ Plug in the glove and **close the Arduino IDE Serial Monitor** (it locks COM5). 
 
 **Window 1: gateway**
 
+Put the three values in `gateway/.env` once (gitignored; copy `gateway/.env.example`):
+
+```
+MOIST_API=<ApiUrl>
+MOIST_API_KEY=<WRITE_API_KEY>
+MOIST_GATEWAY_TOKEN=<GATEWAY_TOKEN>
+```
+
+Then:
+
 ```powershell
 cd D:\moist
-$env:MOIST_API = "<ApiUrl>"
-$env:MOIST_API_KEY = "<WRITE_API_KEY>"
-$env:MOIST_GATEWAY_TOKEN = "<GATEWAY_TOKEN>"
 python gateway/gateway.py --port COM5 --area-id demo-bench --area-name "Demo bench" --lat 28.6139 --lon 77.2090
 ```
 
@@ -196,8 +207,8 @@ Open `DashboardUrl` and go through this list:
 
 - [ ] **Landing page** loads over HTTPS from CloudFront.
 - [ ] **Live sorting:** tick *Real glove only* and take a reading. It appears within about 2 seconds.
-- [ ] **AI assistant:** ask "Which collection point should go to the energy plant?" The answer is tagged with the Claude model name.
-- [ ] **Morning brief → Regenerate:** the footer says *Written by Claude on Amazon Bedrock*.
+- [ ] **AI assistant:** ask "Which collection point should go to the energy plant?" The answer shows the model that wrote it (e.g. `nvidia/nemotron-3-super-120b-a12b:free`).
+- [ ] **Morning brief → Regenerate:** the footer says *Written by AI · <model>* (it can take up to 25 seconds on free models).
 - [ ] **Sidebar:** *Gateway online · glove plugged in*.
 - [ ] **Fault alert:** touch both probe contacts to a metal spoon. The reading is flagged *Probe shorted (metal?)*, appears under **Alerts**, and you get an e-mail.
 - [ ] **Scheduled brief:** run it now instead of waiting for 06:30:
@@ -222,7 +233,7 @@ sam logs -n ApiFunction --stack-name moist --tail
 
 ## 11. Costs
 
-At hackathon volume almost everything stays inside the AWS free tier (Lambda, API Gateway, DynamoDB on-demand, S3, CloudFront, SNS e-mail, EventBridge). The only usage-billed part is **Bedrock**: each brief or answer is one Claude call, a few cents at most. Questions are capped at 60 per hour (`ASK_PER_HOUR` in `app.py`), and *Regenerate* at one call per minute. The budget alarm from step 2 warns you well before anything matters.
+At hackathon volume almost everything stays inside the AWS free tier (Lambda, API Gateway, DynamoDB on-demand, S3, CloudFront, SNS e-mail, EventBridge). The AI runs on OpenRouter's free models, which cost nothing (Bedrock Nova 2 Lite, if enabled, is a small fraction of a cent per call). Questions are capped at 60 per hour (`ASK_PER_HOUR` in `app.py`), and *Regenerate* at one call per minute. The budget alarm from step 2 warns you well before anything matters.
 
 ## 12. Troubleshooting
 
@@ -232,8 +243,8 @@ At hackathon volume almost everything stays inside the AWS free tier (Lambda, AP
 | Dashboard loads but shows *Failed to fetch* | `web/.env.production` has the wrong `ApiUrl` (no trailing `/`). Rebuild, sync and invalidate again. |
 | Gateway prints `401` / `Missing or invalid x-api-key` | `MOIST_API_KEY` differs from the `WriteApiKey` you deployed. |
 | Gateway: `could not open port 'COM5'` | The glove is unplugged, the Serial Monitor is open, or the port changed. Check Device Manager → Ports. |
-| AI page: *Claude on Bedrock did not answer* | Model access is not enabled in **us-east-1** (step 3). Details: `sam logs -n ApiFunction --stack-name moist`. |
-| Brief footer still says *Rule-based summary* | Same as above. Click *Regenerate* after enabling access. |
+| AI page: *The AI service is busy* | Every OpenRouter key is rate-limited and Bedrock has no quota (step 3). Wait a minute, add a key, or add credit. Details: `sam logs -n ApiFunction --stack-name moist`. |
+| Brief footer says *Rule-based summary* | Same as above. Click *Regenerate* later. |
 | Sidebar: *Gateway offline* | ngrok is not running, the URL differs from `GatewayUrl`, or the token differs from `GatewayToken`. |
 | No alert e-mails | The SNS subscription was not confirmed. Check spam for the AWS mail. |
 
@@ -254,11 +265,12 @@ Then deactivate the `moist-deployer` access key in IAM.
 | AWS service | Job in MØIST |
 |---|---|
 | **API Gateway** (HTTP API) | Public HTTPS endpoint for the gateway and the dashboard; throttled to 25 req/s |
-| **Lambda** (Python, arm64) | Validates and classifies readings, computes the Energy Suitability Index and actions, serves all dashboard data |
+| **Lambda** (Python 3.14, arm64) | Validates and classifies readings, computes the Energy Suitability Index and actions, serves all dashboard data, calls the LLM, reads the gateway status through ngrok |
 | **DynamoDB** | `Readings` (by area and time, plus a by-day index), `Areas`, `State` (action queue, latest brief, question counter) |
-| **Amazon Bedrock** | Claude Opus 5.5 writes the morning brief and answers officers' questions from the computed figures |
+| **Amazon Bedrock** | Fallback LLM (Amazon Nova 2 Lite) for the brief and questions when OpenRouter is unavailable |
 | **EventBridge Scheduler** | Runs the morning brief every day at 06:30 IST |
 | **SNS** | E-mails fault alerts (shorted probe, gas spike) and the morning brief |
-| **S3 + CloudFront** | Hosts the dashboard privately over HTTPS (Origin Access Control) |
-| **CloudWatch Logs** | Lambda logs and errors |
+| **S3 + CloudFront** | Hosts the dashboard privately over HTTPS (Origin Access Control, PriceClass_200 incl. India) |
+| **CloudFormation** (SAM) | Creates and deletes the whole stack from `backend/template.yaml` |
+| **CloudWatch Logs** | Lambda logs and errors, kept 7 days |
 | **IAM** | Least-privilege role for the Lambda (its tables, its topic, Bedrock) |

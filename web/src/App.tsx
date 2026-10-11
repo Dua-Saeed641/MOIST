@@ -22,7 +22,7 @@ function useHash() {
 const HEAD: Record<PageId, [string, string]> = {
   overview: ["Overview", "Segregation quality and energy potential by collection point"],
   live: ["Live sorting", "Readings as they arrive from each glove"],
-  ai: ["AI assistant", "Claude on Amazon Bedrock explains the numbers and answers questions"],
+  ai: ["AI assistant", "An LLM explains the computed numbers and answers questions"],
   energy: ["Energy planner", "Energy Suitability Index and recommended action by collection point"],
   areas: ["Areas", "Collection points, transfer stations and colonies"],
   alerts: ["Alerts", "Readings excluded from the statistics"],
@@ -36,7 +36,7 @@ function Dashboard({ page }: { page: PageId }) {
     setRange(r);
     try { localStorage.setItem("moist-range", r); } catch { /* private mode */ }
   };
-  const live = useLive(2000);
+  const live = useLive(page === "live" ? 2000 : 15000); // fast only where readings stream in; saves Lambda/DynamoDB calls
   const [title, subtitle] = HEAD[page];
   return (
     <Shell page={page} range={range} onRange={onRange} live={live.meta} title={title} subtitle={subtitle} showRange={page !== "live"}>

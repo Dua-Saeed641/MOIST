@@ -8,7 +8,7 @@
   GET  /alerts?range=     unusual checks
   GET  /actions           PUT /actions/{key}   officer's action queue
   GET  /brief             POST /brief  regenerate the Bedrock brief
-  POST /ask               free-text question about the data, answered by Claude on Bedrock
+  POST /ask               free-text question about the data, answered by an LLM (OpenRouter, then Bedrock)
   GET  /gateway           laptop gateway status, fetched through its ngrok URL (GATEWAY_URL)
 """
 import json
@@ -280,8 +280,8 @@ def get_brief(q, **_):
 
 def post_brief(q, **_):
     last = store().get_state("brief", "latest")
-    if last and last.get("source") == "bedrock" and now_ms() - last["generated"] < 60_000:
-        return 200, last  # cool-down: one Bedrock call per minute at most
+    if last and last.get("source") != "rules" and now_ms() - last["generated"] < 60_000:
+        return 200, last  # cool-down: one AI call per minute at most
     return 200, refresh_brief()
 
 
@@ -291,8 +291,8 @@ def post_ask(q, event, **_):
     if not isinstance(question, str) or not 3 <= len(question.strip()) <= 300:
         raise ApiError(400, "question must be 3 to 300 characters")
     if not ai_enabled():
-        raise ApiError(503, "AI answers need Amazon Bedrock. They work once the backend runs on AWS.")
-    # ponytail: hourly cap stops a public dashboard running up the Bedrock bill; per-user limits need Cognito
+        raise ApiError(503, "AI is switched off (BRIEF_AI=0).")
+    # ponytail: hourly cap protects the free-tier AI quota on a public dashboard; per-user limits need Cognito
     hour = str(now_ms() // HOUR)
     used = (store().get_state("ask", hour) or {}).get("n", 0)
     if used >= ASK_PER_HOUR:
@@ -301,12 +301,11 @@ def post_ask(q, event, **_):
     frm, to, _ = window(b)
     views = area_views(store().list_areas(), store().readings_between(frm, to))
     try:
-        text = answer(views, question.strip(), b.get("range", "7d"))
-    except Exception as e:  # no model access, throttled, ...
-        print(f"ask failed: {e!r}")
-        raise ApiError(502, "Claude on Bedrock did not answer. Check model access in the Bedrock console.")
-    return 200, {"question": question.strip(), "answer": text, "model": os.environ.get("BRIEF_MODEL", "anthropic.claude-opus-5-5"),
-                 "generated": now_ms()}
+        text, model = answer(views, question.strip(), b.get("range", "7d"))
+    except Exception as e:  # every key rate-limited, Bedrock quota 0, ...
+        print(f"ask failed: {e}")
+        raise ApiError(502, "The AI service is busy right now. Try again in a minute.")
+    return 200, {"question": question.strip(), "answer": text, "model": model, "generated": now_ms()}
 
 
 def get_gateway(q, **_):

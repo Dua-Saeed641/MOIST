@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
-Description: MOIST - no-touch moisture glove. Ingest + analytics API, Claude on Bedrock (brief + questions), SNS alerts, hosted dashboard.
+Description: MOIST - no-touch moisture glove. Ingest + analytics API, AI brief + questions (OpenRouter, Bedrock fallback), SNS alerts, hosted dashboard.
 
 Parameters:
   WriteApiKey:
@@ -15,8 +15,12 @@ Parameters:
   BedrockRegion:
     Type: String
     Default: us-east-1
-    Description: Region used for Claude in Amazon Bedrock (the global endpoint routes from any listed region).
-
+    Description: Region for Amazon Bedrock calls (the us. inference profile routes across US regions).
+  OpenRouterKeys:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: Comma-separated OpenRouter API keys for the AI brief and questions, tried in order (Bedrock is the fallback).
   GatewayUrl:
     Type: String
     Default: ""
@@ -106,6 +110,7 @@ Resources:
           BEDROCK_REGION: !Ref BedrockRegion
           GATEWAY_URL: !Ref GatewayUrl
           GATEWAY_TOKEN: !Ref GatewayToken
+          OPENROUTER_KEYS: !Ref OpenRouterKeys
       Policies:
         - DynamoDBCrudPolicy: { TableName: !Ref ReadingsTable }
         - DynamoDBCrudPolicy: { TableName: !Ref AreasTable }
@@ -113,8 +118,10 @@ Resources:
         - SNSPublishMessagePolicy: { TopicName: !GetAtt AlertTopic.TopicName }
         - Statement:
             - Effect: Allow
-              Action: bedrock-mantle:CreateInference
-              Resource: "*"
+              Action: [bedrock:InvokeModel]
+              Resource:
+                - arn:aws:bedrock:*::foundation-model/amazon.nova-*
+                - !Sub "arn:aws:bedrock:*:${AWS::AccountId}:inference-profile/us.amazon.nova-*"
       Events:
         Api: { Type: HttpApi, Properties: { ApiId: !Ref HttpApi } }  # catch-all; app.py routes
         MorningBrief:
@@ -122,6 +129,12 @@ Resources:
           Properties:
             ScheduleExpression: "cron(30 6 * * ? *)"
             ScheduleExpressionTimezone: Asia/Kolkata
+
+  ApiLogs:  # keep a week of logs instead of forever
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${ApiFunction}"
+      RetentionInDays: 7
 
   # Dashboard hosting: private S3 bucket behind CloudFront (HTTPS).
   SiteBucket:
@@ -139,6 +152,7 @@ Resources:
     Properties:
       DistributionConfig:
         Enabled: true
+        PriceClass: PriceClass_200  # edge locations incl. India; cheaper than PriceClass_All
         DefaultRootObject: index.html
         HttpVersion: http2
         Origins:

@@ -50,8 +50,32 @@ assert call("POST", "/ask", {"question": "x"})[0] == 400
 assert call("POST", "/ask", {"question": "Which area is driest?"})[0] == 503  # no Bedrock locally
 assert call("GET", "/gateway") == (200, {"configured": False})
 os.environ["BRIEF_AI"] = "1"
-app.answer = lambda areas, q, period: f"{len(areas)} areas; asked: {q}"
+app.answer = lambda areas, q, period: (f"{len(areas)} areas; asked: {q}", "test-model")
 assert call("POST", "/ask", {"question": "Which area is driest?"})[1]["answer"] == "1 areas; asked: Which area is driest?"
 app.ASK_PER_HOUR = 1
 assert call("POST", "/ask", {"question": "Again?"})[0] == 429
+
+# AI provider chain: a rate-limited key falls through to the next one, then to Bedrock, then raises
+import urllib.error  # noqa: E402
+
+import brief  # noqa: E402
+
+tried = []
+
+
+def fake_or(key, *a, **k):
+    tried.append(key)
+    if key != "k2":
+        raise urllib.error.HTTPError("u", 429, "rate limited", {}, None)
+    return "fine", "free-model"
+
+
+brief.openrouter, os.environ["OPENROUTER_KEYS"] = fake_or, "k1, k2,k3"
+assert brief.generate("s", "c") == ("fine", "openrouter", "free-model") and tried == ["k1", "k2"]
+os.environ["OPENROUTER_KEYS"], os.environ["BEDROCK_FALLBACK"] = "k1,k3", "0"
+try:
+    brief.generate("s", "c")
+    raise AssertionError("expected every provider to fail")
+except RuntimeError as e:
+    assert "key 1: HTTP 429" in str(e) and "key 2: HTTP 429" in str(e)
 print("ok")

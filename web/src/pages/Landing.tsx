@@ -12,7 +12,7 @@ const STEPS = [
 ];
 
 const MORE: { icon: IconName; t: string; d: string }[] = [
-  { icon: "spark", t: "AI assistant", d: "Claude on Amazon Bedrock writes a 06:30 brief for the ward officer and answers questions such as \"Which area needs a segregation drive?\" from the computed figures." },
+  { icon: "spark", t: "AI assistant", d: "An LLM, called from AWS Lambda, writes a 06:30 brief for the ward officer and answers questions such as \"Which area needs a segregation drive?\" from the computed figures." },
   { icon: "alert", t: "Fault detection", d: "Readings from a shorted probe or a gas spike are flagged, excluded from the statistics and sent by e-mail." },
   { icon: "factory", t: "Plant routing", d: "Collection points with a high Energy Suitability Index are queued for direct transport to the waste-to-energy plant." },
 ];
@@ -21,7 +21,7 @@ const AWS = [
   ["API Gateway", "HTTPS endpoint"],
   ["Lambda", "Classification and analytics"],
   ["DynamoDB", "Readings, areas, actions"],
-  ["Bedrock", "Claude: brief and questions"],
+  ["Bedrock + OpenRouter", "AI brief and questions"],
   ["EventBridge Scheduler", "Daily jobs"],
   ["SNS", "Alerts by e-mail"],
   ["S3 + CloudFront", "Dashboard hosting"],
@@ -34,7 +34,7 @@ function scrollTo(id: string) {
 
 export default function Landing() {
   const { data } = usePoll<Overview>("/overview?range=7d", 15000);
-  const live = usePoll<Live>("/live?since=0", 5000);
+  const live = usePoll<Live>("/live?since=0", 15000);
   const k = data?.kpis;
   const latest = live.data?.readings[0];
   const top = data ? [...data.areas].filter((a) => a.stats.count).sort((a, b) => b.stats.esi - a.stats.esi).slice(0, 4) : [];

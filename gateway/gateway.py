@@ -104,9 +104,13 @@ def send(api, key, r, lock):
 
 
 def main():
+    env = Path(__file__).parent / ".env"  # gateway/.env: MOIST_API, MOIST_API_KEY, MOIST_GATEWAY_TOKEN (gitignored)
+    for line in env.read_text(encoding="utf-8").splitlines() if env.exists() else []:
+        if "=" in line and not line.lstrip().startswith("#"):
+            os.environ.setdefault(*map(str.strip, line.split("=", 1)))
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--port", default="COM5", help="Arduino serial port")
-    ap.add_argument("--api", default=os.environ.get("MOIST_API", "http://localhost:8787"))
+    ap.add_argument("--api", default=os.environ.get("MOIST_API") or "http://localhost:8787")
     ap.add_argument("--key", default=os.environ.get("MOIST_API_KEY", ""))
     ap.add_argument("--area-id", default="demo-bench")
     ap.add_argument("--area-name", default="Demo bench")

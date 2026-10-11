@@ -12,7 +12,7 @@ const SUGGESTED = [
   "Are any gloves giving faulty readings?",
 ];
 
-/** Claude on Amazon Bedrock: the morning brief, plus free-text questions about the computed numbers. */
+/** AI assistant: the morning brief, plus free-text questions about the computed numbers. */
 export default function Assistant({ range }: { range: Range }) {
   const { data } = usePoll<Overview>(`/overview?range=${range}`, 0);
   const [q, setQ] = useState("");
@@ -35,10 +35,10 @@ export default function Assistant({ range }: { range: Range }) {
   return (
     <>
       <div className="ai-hero">
-        <span className="ai-badge"><Icon name="spark" size={14} /> Claude on Amazon Bedrock</span>
+        <span className="ai-badge"><Icon name="spark" size={14} /> AI assistant · served from AWS Lambda</span>
         <h2>Ask about your collection points</h2>
         <p>
-          Claude reads the figures MØIST has already computed for the selected period (dry share, moisture, ESI and status
+          The model reads the figures MØIST has already computed for the selected period (dry share, moisture, ESI and status
           for every collection point) and answers in plain language. It explains the numbers; it never classifies waste itself.
         </p>
         <form className="ask" onSubmit={(e) => { e.preventDefault(); ask(q); }}>

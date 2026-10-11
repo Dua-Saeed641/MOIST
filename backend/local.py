@@ -14,7 +14,10 @@ from urllib.parse import parse_qsl, urlparse
 HERE = Path(__file__).parent
 sys.path.insert(0, str(HERE / "src"))
 os.environ.setdefault("GATEWAY_URL", "http://localhost:8790")  # the gateway status endpoint on this laptop
-os.environ.setdefault("BRIEF_AI", "1" if os.environ.get("AWS_ACCESS_KEY_ID") or os.environ.get("AWS_PROFILE") else "0")
+for line in (HERE / ".env").read_text(encoding="utf-8").splitlines() if (HERE / ".env").exists() else []:
+    if "=" in line and not line.lstrip().startswith("#"):  # backend/.env: OPENROUTER_KEYS=... (gitignored)
+        os.environ.setdefault(*map(str.strip, line.split("=", 1)))
+os.environ.setdefault("BEDROCK_FALLBACK", "1" if os.environ.get("AWS_ACCESS_KEY_ID") or os.environ.get("AWS_PROFILE") else "0")
 
 import app  # noqa: E402
 from store import FileStore  # noqa: E402
